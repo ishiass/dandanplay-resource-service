@@ -10,7 +10,7 @@
 [![jsDelivr hits](https://img.shields.io/jsdelivr/gh/hm/LussacZheng/dandanplay-resource-service?color=red)](https://data.jsdelivr.com/v1/package/gh/LussacZheng/dandanplay-resource-service@dist/stats/file)
 
 API implementations for "dandanplay" resource search service.  
-[弹弹play](http://www.dandanplay.com/) 资源搜索节点的 API 实现,本仓库是基于上游仓库拉去的分支，主要为animes.garden站点的搜索worker支持版,其余部署方式均与上游仓库相同。
+[弹弹play](http://www.dandanplay.com/) 资源搜索节点的 API 实现,本仓库是基于上游仓库拉取的分支，主要为animes.garden站点的搜索worker支持版,其余部署方式均与上游仓库相同。
 
 提供分别基于 [**Cloudflare Workers**](#cloudflare-workers), [**Deno Deploy**](#deno-deploy), [**Golang**](#golang) 和 [**Rust**](#rust) 的四种实现。
 
