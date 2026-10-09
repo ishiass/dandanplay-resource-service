@@ -10,7 +10,7 @@
 [![jsDelivr hits](https://img.shields.io/jsdelivr/gh/hm/LussacZheng/dandanplay-resource-service?color=red)](https://data.jsdelivr.com/v1/package/gh/LussacZheng/dandanplay-resource-service@dist/stats/file)
 
 API implementations for "dandanplay" resource search service.  
-[弹弹play](http://www.dandanplay.com/) 资源搜索节点的 API 实现。
+[弹弹play](http://www.dandanplay.com/) 资源搜索节点的 API 实现,本仓库是基于上游仓库拉去的分支，主要为animes.garden站点的搜索worker支持版,其余部署方式均与上游仓库相同。
 
 提供分别基于 [**Cloudflare Workers**](#cloudflare-workers), [**Deno Deploy**](#deno-deploy), [**Golang**](#golang) 和 [**Rust**](#rust) 的四种实现。
 
@@ -29,7 +29,9 @@ API implementations for "dandanplay" resource search service.
 > - 可在搜索引擎中搜索 "`Cloudflare Workers部署教程`" ，参照进行。
 > - 由于暂未实现 [缓存机制](https://developers.cloudflare.com/workers/runtime-apis/cache) ，且 Cloudflare Workers 免费版账户有每日 100,000 的请求次数限制，目前暂不提供演示站点。可以自行部署体验。
 
-复制 [`worker.js`](https://github.com/LussacZheng/dandanplay-resource-service/blob/dist/cf-worker/worker.js) 内容到 [workers.dev 脚本编辑页面](https://workers.cloudflare.com/) 中，部署即可。
+复制 [`worker.js`](https://github.com/ishiass/dandanplay-resource-service/blob/dist/cf-worker/worker.js) 内容到 [workers.dev 脚本编辑页面](https://workers.cloudflare.com/) 中，部署即可。
+
+演示站点: dandan.api.reins.cyou,dandan.api.rein.ccwu.cc
 
 ## Deno Deploy
 
