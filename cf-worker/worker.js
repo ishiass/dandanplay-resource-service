@@ -1,246 +1,246 @@
-// https://github.com/LussacZheng/dandanplay-resource-service
-// version: 0.0.5-alpha
-// build: 2022-11-20 18:13:26 GMT+0800
+// https://github.com/ishiass/dandanplay-resource-service
+// version: 0.0.5-alpha-branch-special_version-anime_garden
+// build: 2026-10-10 01:24:42 GMT+0800
 // wrangler: 2.4.2
+// Dandanplay resource search service backed by Anime Garden.
 
-var h = { headers: { 'content-type': 'application/json;charset=utf-8' } },
-  R = { headers: { 'content-type': 'text/html;charset=utf-8' } }
-var j = {
-  headers: {
-    accept: 'text/html;charset=utf-8',
-    'user-agent': 'Mozilla/5.0 (Windows NT 6.1; Win64; x64; rv:47.0) Gecko/20100101 Firefox/47.0',
-  },
+const API_BASE = 'https://api.animes.garden'
+const VERSION = '1.0.0-anime-garden'
+const HOMEPAGE = 'https://animes.garden/docs/api'
+const WEB_HOME =
+  'https://cdn.jsdelivr.net/gh/LussacZheng/dandanplay-resource-service@dist/web/index.html'
+
+const JSON_HEADERS = {
+  'content-type': 'application/json; charset=utf-8',
+  'access-control-allow-origin': '*',
+  'access-control-allow-methods': 'GET, OPTIONS',
+  'access-control-allow-headers': 'content-type',
 }
-async function m(e, r = j) {
-  let t = await fetch(decodeURI(e), r)
-  if (!t.ok) throw new Error(`Bad response from server: ${t.status}`)
-  return await C(t)
-}
-async function C(e) {
-  let { headers: r } = e,
-    t = r.get('content-type')
-  return t?.includes('application/json')
-    ? await e.json()
-    : t?.includes('application/text')
-    ? await e.text()
-    : t?.includes('text/html')
-    ? await e.text()
-    : await e.text()
-}
-var b = class {
-    constructor(r) {
-      let { keyword: t, options: s } = G(r)
-      ;(this.keyword = t),
-        (this.options = {
-          realtime: s.realtime || w.UNUSED.realtime,
-          page: s.page || w.UNUSED.page,
-          limit: s.limit || w.UNUSED.limit,
-        })
-    }
-  },
-  w = {
-    UNUSED: { realtime: 0, page: 1, limit: 200 },
-    UNASSIGNED: { realtime: 1, page: 1, limit: 80 },
-    UNDEFINED: 1,
-  }
-function G(e) {
-  let r = {}
-  return {
-    keyword: e
-      .replace(/(?: |^)\$([a-z]+)(?::(\d+))?(?=\s|$)/g, (s, n, o) => {
-        let p = parseInt(o)
-        return (r[n] = isNaN(p) ? w.UNASSIGNED[n] || w.UNDEFINED : p), ''
-      })
-      .replace(/\$\$/g, '$'),
-    options: r,
-  }
-}
-function J(e, r, t, s = 'first') {
-  switch (s) {
-    case 'all':
-      return q(e, r, t)
-    case 'last':
-      return W(e, r, t)
-    default:
-      return Z(e, r, t)
-  }
-}
-function Z(e, r, t) {
-  let s = r.exec(e)
-  return (r.lastIndex = 0), s === null ? null : I(s, t)
-}
-function W(e, r, t) {
-  let s = [...e.matchAll(r)],
-    n = s[s.length - 1]
-  return s.length === 0 ? null : I(n, t)
-}
-function q(e, r, t) {
-  let s = e.matchAll(r),
-    n = Array.from(s, o => I(o, t))
-  return n.length === 0 ? null : n
-}
-function I(e, r) {
-  if (!r || !r.length) return e[1]
-  let t = {}
-  return (
-    r.length > e.length - 1 && r.splice(e.length - 1),
-    r.forEach((s, n) => {
-      t[s] = e[n + 1]
-    }),
-    t
-  )
-}
-var i = J
-function D(e, r) {
-  let t = new Date(e).toLocaleString('default', {
-    formatMatcher: 'best fit',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hourCycle: 'h23',
-    timeZone: r,
+
+// These IDs are stable inside this adapter. Anime Garden itself filters by
+// the type name, so the numeric IDs only exist for Dandanplay compatibility.
+const TYPES = [
+  { Id: 0, Name: '\u5168\u90e8' },
+  { Id: 1, Name: '\u52a8\u753b' },
+  { Id: 2, Name: '\u5408\u96c6' },
+  { Id: 3, Name: '\u97f3\u4e50' },
+  { Id: 4, Name: '\u65e5\u5267' },
+  { Id: 5, Name: 'RAW' },
+  { Id: 6, Name: '\u6f2b\u753b' },
+  { Id: 7, Name: '\u6e38\u620f' },
+  { Id: 8, Name: '\u7279\u6444' },
+  { Id: 9, Name: '\u5176\u4ed6' },
+]
+const TYPE_BY_ID = new Map(TYPES.map(type => [type.Id, type.Name]))
+const TYPE_BY_NAME = new Map(TYPES.map(type => [type.Name, type.Id]))
+
+// The Worker isolate may be reused between requests. Keep this list in memory
+// when possible, but refresh it automatically after a failed request.
+let teamsPromise
+
+function responseJson(value, status = 200, cache = 'no-store') {
+  return new Response(JSON.stringify(value), {
+    status,
+    headers: { ...JSON_HEADERS, 'cache-control': cache },
   })
-  return new Date(t + ' GMT').toISOString().substring(0, 19).replace('T', ' ')
 }
-function f(e, r) {
-  return e.replace(/\$\{([\w-]+)\}/g, (t, s) => `${r[s] ?? t}`)
+
+async function fetchJson(url, init = {}) {
+  const response = await fetch(url, {
+    ...init,
+    headers: {
+      accept: 'application/json',
+      'user-agent': 'dandanplay-resource-service/anime-garden',
+      ...(init.headers || {}),
+    },
+  })
+
+  if (!response.ok) {
+    throw new Error(`Anime Garden returned HTTP ${response.status}`)
+  }
+
+  return response.json()
 }
-var x = 'https://share.dmhy.org',
-  S = {
-    type_and_subgroup_url: `${x}/topics/advanced-search?team_id=0&sort_id=0&orderby=`,
-    list_url: `${x}/topics/list/page/\${page}?keyword=\${keyword}&sort_id=\${type}&team_id=\${subgroup}&order=date-desc`,
-    index_url: `${x}/topics/list/page/\${realtime}`,
-  },
-  l = {
-    Title: '\u672A\u80FD\u6210\u529F\u89E3\u6790\u6807\u9898',
-    TypeId: -2,
-    TypeName: '\u672A\u80FD\u6210\u529F\u89E3\u6790\u7C7B\u522B',
-    SubgroupId: -1,
-    SubgroupName: '\u672A\u77E5\u5B57\u5E55\u7EC4',
-    Magnet:
-      'magnet_not_found_\u672A\u80FD\u6210\u529F\u89E3\u6790\u78C1\u529B\u94FE\u63A5\u6216\u78C1\u529B\u94FE\u63A5\u4E0D\u5B58\u5728',
-    PageUrl: '\u672A\u80FD\u6210\u529F\u89E3\u6790\u8D44\u6E90\u53D1\u5E03\u9875\u9762',
-    FileSize: '\u672A\u80FD\u6210\u529F\u89E3\u6790\u8D44\u6E90\u5927\u5C0F',
-    PublishDate: '1970-01-01 08:00:00',
-  },
-  c = {
-    Subgroups: /<option value="(\d+)">(.+?)<\/option>/gim,
-    Types: /<option value="(\d+)" style="color: [\w#]+">(.+?)<\/option>/gim,
-    List: {
-      HasMore: /href=.*下一頁<\/a>/gim,
-      Resources: /<tr class="">(.*?)<\/tr>/gis,
-      TypeId: /href="\/topics\/list\/sort_id\/(\d+)"/gim,
-      TypeName: /<font color=[\w#]+>(.+)<\/font>/gim,
-      SubgroupId: /href="\/topics\/list\/team_id\/(\d+)"/gim,
-      SubgroupName: /\s+(.*)<\/a><\/span>/gim,
-      Magnet: /href="(magnet:\?xt=urn:btih:.+?)"/gim,
-      PageUrl: /href="(.+?)"\s*target="_blank"/gim,
-      FileSize: /<td.*>([\w\.]+B)<\/td>/gim,
-      PublishDate: /<span style="display: none;">([\d\/ :]+)<\/span>/gim,
-      Title: /target="_blank" ?>(.+?)<\/a>/gis,
-      TitleReplacer: /<span class="keyword">(.*?)<\/span>/gi,
+
+function positiveInt(value, fallback, maximum = Number.MAX_SAFE_INTEGER) {
+  const number = Number.parseInt(value, 10)
+  if (!Number.isFinite(number) || number < 1) return fallback
+  return Math.min(number, maximum)
+}
+
+function parseKeyword(input) {
+  const options = { page: 1, limit: 200, realtime: 0 }
+  const keyword = String(input || '')
+    .replace(/(?:^|\s)\$([a-z]+)(?::(\d+))?(?=\s|$)/gi, (_, name, value) => {
+      const key = name.toLowerCase()
+      if (key === 'page') options.page = positiveInt(value, 1, 10000)
+      if (key === 'limit') options.limit = positiveInt(value, 200, 1000)
+      if (key === 'realtime') options.realtime = positiveInt(value, 1, 1)
+      return ''
+    })
+    .replace(/\$\$/g, '$')
+    .trim()
+
+  return { keyword, options }
+}
+
+async function getTeams() {
+  if (!teamsPromise) {
+    teamsPromise = fetchJson(`${API_BASE}/teams`)
+      .then(data => (Array.isArray(data.teams) ? data.teams : []))
+      .catch(error => {
+        teamsPromise = undefined
+        throw error
+      })
+  }
+  return teamsPromise
+}
+
+async function getTeamName(id) {
+  if (!id) return ''
+  const team = (await getTeams()).find(item => Number(item.id) === Number(id))
+  return team?.name || ''
+}
+
+function formatSize(bytes) {
+  const value = Number(bytes)
+  if (!Number.isFinite(value) || value < 0) return '0B'
+
+  const units = ['B', 'KB', 'MB', 'GB', 'TB']
+  let index = 0
+  let size = value
+  while (size >= 1024 && index < units.length - 1) {
+    size /= 1024
+    index += 1
+  }
+
+  const digits = index === 0 ? 0 : size >= 100 ? 0 : size >= 10 ? 1 : 2
+  return `${size.toFixed(digits)}${units[index]}`
+}
+
+function formatDate(value) {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return '1970-01-01 08:00:00'
+
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Shanghai',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hourCycle: 'h23',
+    })
+      .formatToParts(date)
+      .filter(part => part.type !== 'literal')
+      .map(part => [part.type, part.value]),
+  )
+
+  return `${parts.year}-${parts.month}-${parts.day} ${parts.hour}:${parts.minute}:${parts.second}`
+}
+
+function mapResource(resource) {
+  const typeName = String(resource.type || '\u672a\u77e5\u7c7b\u578b')
+  const fansub = resource.fansub && typeof resource.fansub === 'object' ? resource.fansub : null
+  const publisher = resource.publisher && typeof resource.publisher === 'object' ? resource.publisher : null
+
+  return {
+    Title: String(resource.title || '\u672a\u80fd\u6210\u529f\u89e3\u6790\u6807\u9898'),
+    TypeId: TYPE_BY_NAME.get(typeName) ?? -1,
+    TypeName: typeName,
+    SubgroupId: fansub?.id ? Number(fansub.id) : -1,
+    // Some resources have no parsed fansub. Publisher is a useful readable fallback.
+    SubgroupName: fansub?.name || publisher?.name || '\u672a\u77e5\u5b57\u5e55\u7ec4',
+    Magnet: String(resource.magnet || 'magnet_not_found'),
+    PageUrl: String(resource.href || ''),
+    FileSize: formatSize(resource.size),
+    PublishDate: formatDate(resource.createdAt),
+  }
+}
+
+async function searchResources(url) {
+  const parsed = parseKeyword(url.searchParams.get('keyword'))
+  const requestedPage = url.searchParams.has('page')
+    ? positiveInt(url.searchParams.get('page'), 1, 10000)
+    : parsed.options.page
+  const pageSize = url.searchParams.has('pageSize')
+    ? positiveInt(url.searchParams.get('pageSize'), 200, 1000)
+    : parsed.options.limit
+  // Anime Garden rejects requests deeper than offset 10000.
+  const page = Math.min(requestedPage, Math.max(1, Math.floor(10000 / pageSize)))
+  const query = new URLSearchParams({
+    page: String(page),
+    pageSize: String(pageSize),
+  })
+
+  if (parsed.keyword) query.set('search', parsed.keyword)
+
+  const type = url.searchParams.get('type') || ''
+  const typeId = Number.parseInt(type, 10)
+  if (type && Number.isFinite(typeId) && typeId > 0 && TYPE_BY_ID.has(typeId)) {
+    query.set('type', TYPE_BY_ID.get(typeId))
+  } else if (type && !Number.isFinite(typeId)) {
+    query.set('type', type)
+  }
+
+  const subgroup = url.searchParams.get('subgroup') || ''
+  if (subgroup) {
+    const subgroupName = await getTeamName(subgroup)
+    if (subgroupName) query.set('fansub', subgroupName)
+  }
+
+  // Anime Garden has no realtime flag. Its resources endpoint is the indexed
+  // API, so $realtime is accepted for client compatibility but has no effect.
+  const data = await fetchJson(`${API_BASE}/resources?${query.toString()}`)
+  const resources = Array.isArray(data.resources) ? data.resources.map(mapResource) : []
+
+  return {
+    HasMore: data.pagination ? !data.pagination.complete : resources.length >= pageSize,
+    Resources: resources,
+  }
+}
+
+async function listSubgroups() {
+  const teams = await getTeams()
+  return {
+    Subgroups: teams
+      .map(team => ({ Id: Number(team.id), Name: String(team.name || '') }))
+      .filter(team => Number.isFinite(team.Id) && team.Name),
+  }
+}
+
+function listTypes() {
+  return { Types: TYPES }
+}
+
+function selfInfo() {
+  return {
+    name: 'dandanplay-resource-service',
+    version: VERSION,
+    dev: false,
+    info: {
+      homepage: HOMEPAGE,
+      description: 'Dandanplay resource search adapter for Anime Garden.',
+    },
+    meta: {
+      implementation: { platform: 'cf-worker', tool: 'wrangler' },
+    },
+    options: {
+      instruction: HOMEPAGE,
+      supported: ['$page', '$limit'],
     },
   }
-async function N() {
-  let e = await m(S.type_and_subgroup_url)
-  return { Subgroups: V(e) }
 }
-async function T() {
-  let e = await m(S.type_and_subgroup_url)
-  return { Types: B(e) }
-}
-async function L(e) {
-  let r = new URL(encodeURI(e)).searchParams,
-    t = Number(r.get('type')) || 0,
-    s = Number(r.get('subgroup')) || 0
-  ;(t = t < 0 ? 0 : t), (s = s < 0 ? 0 : s)
-  let { keyword: n, options: o } = new b(decodeURIComponent(r.get('keyword') || '')),
-    p = encodeURI(f(S.list_url, { page: o.page, keyword: n, type: t, subgroup: s })),
-    u = await m(p),
-    a = K(u)
-  if (o.realtime) {
-    let d = encodeURI(f(S.index_url, { realtime: o.realtime }))
-    u = await m(d)
-    let y = Y(u, n, s, t, a.Resources)
-    a.Resources = y.concat(a.Resources)
-  }
-  return a.Resources.length > o.limit && (a.Resources = a.Resources.slice(0, o.limit)), a
-}
-function V(e) {
-  let r = e.replace(/&amp;/gi, '&'),
-    t = i(r, c.Subgroups, ['Id', 'Name'], 'all')
-  if (t === null) return []
-  let s = t.map(n => M(n))
-  return s.shift(), s
-}
-function B(e) {
-  let r = i(e, c.Types, ['Id', 'Name'], 'all')
-  if (r === null) return []
-  let t = r.map(s => M(s))
-  return t.unshift({ Id: 0, Name: '\u5168\u90E8' }), t
-}
-function K(e) {
-  let r = { HasMore: i(e, c.List.HasMore, []) !== null, Resources: [] },
-    t = i(e, c.List.Resources, [], 'all')
-  return (
-    t === null ||
-      t.forEach(s => {
-        r.Resources.push(P(s))
-      }),
-    r
-  )
-}
-function M(e) {
-  return { Id: parseInt(e.Id), Name: e.Name }
-}
-function Y(e, r, t, s, n) {
-  let o = [],
-    p = i(e, c.List.Resources, [], 'all')
-  return p === null
-    ? []
-    : (p.forEach(u => {
-        let a = P(u),
-          d = r.split(' ').every(v => a.Title.toLowerCase().includes(v.toLowerCase())),
-          y = t === 0 ? !0 : a.SubgroupId === t,
-          H = s === 0 ? !0 : a.TypeId === s,
-          z = n.some(v => a.PageUrl === v.PageUrl)
-        d && y && H && !z && o.push(a)
-      }),
-      o)
-}
-function P(e) {
-  let r = i(e, c.List.Title, []),
-    t = i(e, c.List.TypeId, []),
-    s = i(e, c.List.TypeName, []),
-    n = i(e, c.List.SubgroupId, []),
-    o = i(e, c.List.SubgroupName, []),
-    p = i(e, c.List.Magnet, []),
-    u = i(e, c.List.PageUrl, []),
-    a = i(e, c.List.FileSize, []),
-    d = i(e, c.List.PublishDate, [])
-  return {
-    Title: r === null ? l.Title : r.trim().replace(c.List.TitleReplacer, '$1'),
-    TypeId: Number(t) || l.TypeId,
-    TypeName: s || l.TypeName,
-    SubgroupId: Number(n) || l.SubgroupId,
-    SubgroupName: o || l.SubgroupName,
-    Magnet: p || l.Magnet,
-    PageUrl: u === null ? l.PageUrl : x + u,
-    FileSize: a || l.FileSize,
-    PublishDate: d === null ? l.PublishDate : D(d),
-  }
-}
-var X = 'https://cdn.jsdelivr.net/gh/LussacZheng/dandanplay-resource-service@dist/web/index.html',
-  Q = `
+
+const FALLBACK_HOME = `
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>\u5F39\u5F39play\u8D44\u6E90\u641C\u7D22\u8282\u70B9API - v\${VERSION}</title>
+  <title>\u5F39\u5F39play\u8D44\u6E90\u641C\u7D22\u8282\u70B9API - \${VERSION}</title>
 </head>
 <body>
   <h1>\u4F7F\u7528\u8BF4\u660E</h1>
@@ -249,103 +249,78 @@ var X = 'https://cdn.jsdelivr.net/gh/LussacZheng/dandanplay-resource-service@dis
 </body>
 </html>
 `
-async function _(e, r, t = 'ts-impl') {
+
+function replaceTemplate(value, variables) {
+  return value.replace(/\$\{([\w-]+)\}/g, (_, key) => variables[key] ?? `\${${key}}`)
+}
+
+async function htmlHome() {
   try {
-    let s = await m(X)
-    return f(s, { VERSION: e, IMPL: t })
-  } catch (s) {
-    return console.error(s), f(Q, { VERSION: e, HOMEPAGE: r })
-  }
-}
-function k(e) {
-  return {
-    name: e.name,
-    version: e.version,
-    dev: !/^[\d\.]+$/.test(e.version),
-    info: { homepage: e.homepage, description: e.description },
-    meta: {
-      implementation: { platform: e.platform, tool: e.tool, version: '2.4.2' },
-      git_commit_hash: 'f0bec12c4b12917fc955c53409dc194cbadac174',
-      build_at: '2022-11-20T10:13:26Z',
-    },
-    options: {
-      instruction: 'https://github.com/LussacZheng/dandanplay-resource-service/tree/main/docs',
-      supported: ['$realtime', '$page', '$limit'],
-    },
-  }
-}
-function A({ base: e = '', routes: r = [] } = {}) {
-  return {
-    __proto__: new Proxy(
-      {},
-      {
-        get:
-          (t, s, n) =>
-          (o, ...p) =>
-            r.push([
-              s.toUpperCase(),
-              RegExp(
-                `^${(e + o)
-                  .replace(/(\/?)\*/g, '($1.*)?')
-                  .replace(/(\/$)|((?<=\/)\/)/, '')
-                  .replace(/:(\w+)(\?)?(\.)?/g, '$2(?<$1>[^/]+)$2$3')
-                  .replace(/\.(?=[\w(])/, '\\.')
-                  .replace(/\)\.\?\(([^\[]+)\[\^/g, '?)\\.?($1(?<=\\.)[^\\.')}/*$`,
-              ),
-              p,
-            ]) && n,
+    const response = await fetch(WEB_HOME, {
+      headers: {
+        accept: 'text/html;charset=utf-8',
+        'user-agent': 'dandanplay-resource-service/anime-garden',
       },
-    ),
-    routes: r,
-    async handle(t, ...s) {
-      let n,
-        o,
-        p = new URL(t.url)
-      t.query = Object.fromEntries(p.searchParams)
-      for (var [u, a, d] of r)
-        if ((u === t.method || u === 'ALL') && (o = p.pathname.match(a))) {
-          t.params = o.groups
-          for (var y of d) if ((n = await y(t.proxy || t, ...s)) !== void 0) return n
-        }
-    },
+    })
+    if (!response.ok) throw new Error(`Web page returned HTTP ${response.status}`)
+
+    const html = await response.text()
+    return new Response(
+      replaceTemplate(html, { VERSION, HOMEPAGE, IMPL: 'cfw-impl' }),
+      {
+        headers: {
+          'content-type': 'text/html; charset=utf-8',
+          'access-control-allow-origin': '*',
+        },
+      },
+    )
+  } catch (error) {
+    return new Response(
+      replaceTemplate(FALLBACK_HOME, { VERSION, HOMEPAGE, IMPL: 'cfw-impl' }),
+      {
+        headers: {
+          'content-type': 'text/html; charset=utf-8',
+          'access-control-allow-origin': '*',
+        },
+      },
+    )
   }
 }
-var F = 'dandanplay-resource-service',
-  U = '0.0.5-alpha'
-var E = 'https://github.com/LussacZheng/dandanplay-resource-service'
-var O =
-  "API implementation for 'dandanplay' resource search service, based on TypeScript and Cloudflare Workers."
-var g = A()
-g.get('/subgroup', async () => {
-  let e = await N()
-  return new Response(JSON.stringify(e), h)
-})
-g.get('/type', async () => {
-  let e = await T()
-  return new Response(JSON.stringify(e), h)
-})
-g.get('/list', async e => {
-  let r = await L(e.url)
-  return new Response(JSON.stringify(r), h)
-})
-g.get('/', async () => new Response(await _(U, E, 'cfw-impl'), R))
-g.get(
-  '/self',
-  () =>
-    new Response(
-      JSON.stringify(
-        k({
-          name: F,
-          version: U,
-          homepage: E,
-          description: O,
-          platform: 'cf-worker',
-          tool: 'wrangler',
-        }),
-      ),
-      h,
-    ),
-)
-g.all('*', () => new Response('Not Found.', { status: 404 }))
-var _e = { fetch: g.handle }
-export { _e as default }
+
+function notFound() {
+  return responseJson({ status: 'ERROR', message: 'Not Found.' }, 404)
+}
+
+export default {
+  async fetch(request) {
+    if (request.method === 'OPTIONS') {
+      return new Response(null, { status: 204, headers: JSON_HEADERS })
+    }
+
+    if (request.method !== 'GET') {
+      return responseJson({ status: 'ERROR', message: 'Method Not Allowed.' }, 405)
+    }
+
+    const url = new URL(request.url)
+    const pathname = url.pathname.replace(/\/+$/, '') || '/'
+
+    try {
+      if (pathname === '/') return htmlHome()
+      if (pathname === '/self') return responseJson(selfInfo(), 200, 'public, max-age=3600')
+      if (pathname === '/type') return responseJson(listTypes(), 200, 'public, max-age=3600')
+      if (pathname === '/subgroup') {
+        return responseJson(await listSubgroups(), 200, 'public, max-age=3600')
+      }
+      if (pathname === '/list') return responseJson(await searchResources(url))
+      return notFound()
+    } catch (error) {
+      return responseJson(
+        {
+          status: 'ERROR',
+          message: error instanceof Error ? error.message : 'Upstream request failed.',
+        },
+        502,
+      )
+    }
+  },
+}
