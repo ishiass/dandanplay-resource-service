@@ -31,7 +31,9 @@ API implementations for "dandanplay" resource search service.
 
 复制 [`worker.js`](https://github.com/ishiass/dandanplay-resource-service/blob/dist/cf-worker/worker.js) 内容到 [workers.dev 脚本编辑页面](https://workers.cloudflare.com/) 中，部署即可。
 
-演示站点: dandan.api.reins.cyou,dandan.api.rein.ccwu.cc
+演示站点: 
+dandan.api.reins.cyou                            (cloudflare cdn优选)
+dandan.api.rein.ccwu.cc                          (亚太cdn)
 
 ## Deno Deploy
 
